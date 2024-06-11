@@ -1,0 +1,120 @@
+pipenv install fastapi
+pipenv install alembic
+pipenv install sqlalchemy
+pipenv install asyncpg
+pipenv install uvicorn
+
+Робимо скелет сайту, створюємо папку src в ней database в ней файлы db.py models.py
+в src создаем папку  routes в ней файл contacts.py
+src создаем файл schemas.py
+src создаем папку repository файл contacts.py
+1. src создаем папку conf файл config.py
+class Config:
+    DB_URL = "postgresql+psycopg2://postgres:150209@localhost:5432/contacts"
+
+
+config = Config
+
+вручную создаем базу даных contacts в dbeaver
+
+2. db.py:
+import contextlib
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from src.conf.config import config  # Импортируем наш конфиг
+
+class DatabaseSessionManager:
+    def __init__(self, url: str):
+        self._engine: AsyncEngine | None = create_async_engine(url)  # Создаем асинхронный движок SQLAlchemy
+        self._session_maker: async_sessionmaker = async_sessionmaker(autoflush=False, autocommit=False,
+                                                                     bind=self._engine)  # Создаем фабрику сессий
+
+    @contextlib.asynccontextmanager
+    async def session(self):
+        if self._session_maker is None:
+            raise Exception("Session is not initialized")  # Выбрасываем исключение, если сессия не инициализирована
+        session = self._session_maker()  # Создаем асинхронную сессию
+        try:
+            yield session  # Передаем сессию в контекст управления
+        except Exception as err:
+            print(err)  # Выводим ошибку
+            await session.rollback()  # Откатываем транзакцию при ошибке
+        finally:
+            await session.close()  # Закрываем сессию
+
+# Создаем менеджер сессий для нашей базы данных с использованием конфигурационного URL
+sessionmanager = DatabaseSessionManager(config.DB_URL)
+
+# Функция для получения асинхронной сессии базы данных
+async def get_db():
+    async with sessionmanager.session() as session:
+        yield session  # Возвращаем сессию базы данных
+
+
+
+3. Создаем модель в models.py
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import String, DateTime
+import datetime
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Contact(Base):
+    __tablename__ = 'contacts'
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    first_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    email: Mapped[str] = mapped_column(String(50), nullable=False)
+    phone_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    birthday: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False, default=datetime.datetime.now)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False, default=datetime.datetime.now, onupdate=datetime.datetime.now)
+
+
+Делаем шаблон пустой index.html Будем его дорабатівать потом
+
+
+
+
+4. Идем в main.py
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+
+app = FastAPI()
+
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+templates = Jinja2Templates(directory="templates")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def main(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request, "tilte": "HW11 APP"}) 
+
+
+5. alembic init
+alembic init migration
+
+6. env.py идем туда и будем делать так, чтобы алембик видел ту же базу даных что и ФастАпи
+from src.conf.config import config as app_config
+from src.database.models import Base
+
+
+target_metadata = Base.metadata
+config.set_main_option("sqlalchemy.url", app_config.DB_URL)
+
+
+alembic revision --autogenerate -m "Init"
+alembic upgrade head
+
+6. Робимо файл routes/contacts.py
+
+
+uvicorn main:app --reload
+
