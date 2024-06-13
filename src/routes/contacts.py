@@ -8,6 +8,7 @@ from src.repository import contacts as repository_contacts
 from sqlalchemy import or_, select
 from src.database.models import Contact
 from datetime import date, timedelta
+from .schemas import TokenModel, UserResponse
 
 # Создание логгера
 logger = logging.getLogger(__name__)
