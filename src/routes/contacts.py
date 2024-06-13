@@ -86,7 +86,6 @@ async def delete_contact(contact_id: int = Path(ge=1), db: AsyncSession = Depend
     contact = await repository_contacts.delete_contact(contact_id, db)
     return contact
 
-
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def signup(body: UserModel, background_tasks: BackgroundTasks, request: Request, db: Session = Depends(get_db)):
     exist_user = await repository_users.get_user_by_email(body.email, db)
