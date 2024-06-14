@@ -1,12 +1,9 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
-from typing import List
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.database.db import get_db
 from src.schemas import ContactBase, ContactCreate, ContactInDB, ContactUpdate
-from src.repository import contacts as repository_contacts
-from sqlalchemy import or_, select
 from src.database.models import Contact
+from sqlalchemy import select, extract
 from datetime import date, timedelta
 
 # Создание логгера
@@ -24,69 +21,90 @@ console_handler.setFormatter(formatter)
 # Добавление обработчика к логгеру
 logger.addHandler(console_handler)
 
-router = APIRouter(prefix="/contacts", tags=["contacts"])
 
-
-@router.get("/", response_model=list[ContactInDB])
-async def get_contacts(limit: int = Query(10, ge=10, le=500), offset: int = Query(0, ge=0),
-                    db: AsyncSession = Depends(get_db)):
-    contacts = await repository_contacts.get_contacts(limit, offset, db)
-    return contacts
-
-
-@router.post("/", response_model=ContactInDB, status_code=status.HTTP_201_CREATED)
-async def create_contact(contact_data: ContactCreate, db: AsyncSession = Depends(get_db)):
-    """
-    Create a new contact.
-    """
+async def create(body: ContactBase, db: AsyncSession):
     try:
-        contact = await repository_contacts.create(contact_data, db)
+        contact = Contact(**body.model_dump())
+        db.add(contact)
+        await db.commit()
+        await db.refresh(contact)
         return contact
     except Exception as e:
         logger.error(f"Error while creating contact: {e}")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="NOT FOUND")
+        if "ValidationError" in str(e):
+            logger.error("Validation error occurred.")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
-@router.get("/birthday", response_model=list[ContactInDB])
-async def get_birthdays(days: int = Query(7, ge=7), db: AsyncSession = Depends(get_db)):
-    contacts = await repository_contacts.get_birthdays(days, db)
-    return contacts
+async def get_contacts(limit: int, offset: int, db: AsyncSession):
+    stmt = select(Contact).offset(offset).limit(limit)
+    contacts = await db.execute(stmt)
+    return contacts.scalars().all()
 
 
-@router.get("/search", response_model=list[ContactInDB])
-async def serch(
-    first_name: str = None,
-    last_name: str = None,
-    email: str = None,
-    skip: int = 0,
-    limit: int = Query(default=10, le=100, ge=10),
-    db: AsyncSession = Depends(get_db),
-):
-    contacts = await repository_contacts.search(first_name, last_name, email, skip, limit, db)
-    return contacts
-    
-@router.get("/{contact_id}", response_model=ContactInDB)
-async def get_contact(contact_id: int = Path(ge=1), db: AsyncSession = Depends(get_db)):
-    contact = await repository_contacts.get_contact(contact_id, db)
-    if contact is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="NOT FOUND")
+async def get_contact(contact_id: int, db: AsyncSession):
+    stmt = select(Contact).filter_by(id=contact_id)
+    contact = await db.execute(stmt)
+    return contact.scalar_one_or_none()
+
+
+async def update_contact(contact_id: int, body: ContactUpdate, db: AsyncSession):
+    stmt = select(Contact).filter_by(id=contact_id)
+    result = await db.execute(stmt)
+    contact = result.scalar_one_or_none()
+    if contact:
+        contact.first_name = body.first_name
+        contact.last_name = body.last_name
+        contact.email = body.email
+        contact.phone_number = body.phone_number
+        contact.birthday = body.birthday
+        await db.commit()
+        await db.refresh(contact)
     return contact
 
 
-@router.put("/{contact_id}")
-async def update_contact(body: ContactUpdate, contact_id: int = Path(ge=1), db: AsyncSession = Depends(get_db)):
-    contact = await repository_contacts.update_contact(contact_id, body, db)
-    if contact is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="NOT FOUND")
+async def delete_contact(contact_id: int, db: AsyncSession):
+    stmt = select(Contact).filter_by(id=contact_id)
+    contact = await db.execute(stmt)
+    contact = contact.scalar_one_or_none()
+    if contact:
+        await db.delete(contact)
+        await db.commit()
     return contact
 
 
-@router.delete("/{contact_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_contact(contact_id: int = Path(ge=1), db: AsyncSession = Depends(get_db)):
-    contact = await repository_contacts.delete_contact(contact_id, db)
-    return contact
+async def get_birthdays(days, db: AsyncSession):
+    days: int = days + 1
+    filter_month = date.today().month
+    filter_day = date.today().day
+
+    stmt = select(Contact).filter(
+        extract('month', Contact.birthday) == filter_month,
+        extract('day', Contact.birthday) <= filter_day + days
+    )
+
+    contacts = await db.execute(stmt)
+    return contacts.scalars().all()
 
 
+async def search(first_name, last_name, email, skip, limit, db):
+    query = select(Contact)
+    if first_name:
+        query = query.filter(Contact.first_name.ilike(f"%{first_name}%"))
+    if last_name:
+        query = query.filter(Contact.last_name.ilike(f"%{last_name}%"))
+    if email:
+        query = query.filter(Contact.email.ilike(f"%{email}%"))
+
+    result_query = query.offset(skip).limit(limit)
+
+    try:
+        contacts = await db.execute(result_query)
+        return contacts.scalars().all()
+    except Exception as e:
+        # Обработка исключения, запись ошибки в журнал и возврат соответствующего ответа
+        print(f"Ошибка при выполнении запроса к базе данных: {e}")
+        return []
 
 
 

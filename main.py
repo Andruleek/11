@@ -2,11 +2,9 @@ from fastapi import FastAPI, Request, Depends, HTTPException, status
 from src.routes import contacts
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from src.database.db import get_db
-
 
 app = FastAPI()
 
@@ -31,5 +29,5 @@ async def healthchecker(db: AsyncSession = Depends(get_db)):
         print(e)
         raise HTTPException(status_code=500, detail="Error connecting to the database")
 
-    
+
 

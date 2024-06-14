@@ -1,0 +1,14 @@
+11/
+├── main.py
+├── faker_contacts.py
+└── src/
+    ├── schemas.py
+    └── routes/
+        └── contacts.py
+    └── repository/
+        └── contacts.py
+    └── database/
+        └── db.py
+        └── models.py
+    └── conf/
+        └── config.py
